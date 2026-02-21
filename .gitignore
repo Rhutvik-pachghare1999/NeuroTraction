@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+learning/plots/*.png
+# Optional: uncomment the line below if your CSV files are too large for GitHub
+data/*.csv

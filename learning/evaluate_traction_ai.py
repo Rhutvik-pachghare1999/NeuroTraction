@@ -1,0 +1,105 @@
+import torch
+import torch.nn as nn
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import mean_absolute_error, r2_score, confusion_matrix, classification_report
+import joblib
+import glob
+import os
+
+# 1. ARCHITECTURE (The "Sequential" Version - Matches v2 Training)
+class TractionNet(nn.Module):
+    def __init__(self):
+        super(TractionNet, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(7, 32), nn.ReLU(),
+            nn.Linear(32, 16), nn.ReLU(),
+            nn.Linear(16, 8), nn.ReLU(),
+            nn.Linear(8, 4), nn.ReLU(),
+            nn.Linear(4, 1), nn.Sigmoid()
+        )
+    def forward(self, x):
+        return self.net(x)
+
+# 2. Setup
+MODELS_DIR = 'models'
+SCALERS_DIR = 'scalers'
+PLOTS_DIR = 'plots'
+DATA_DIR = '../data'
+os.makedirs(PLOTS_DIR, exist_ok=True)
+
+# 3. Auto-select latest assets (Looking for v2 specifically)
+try:
+    # This picks the absolute latest file regardless of name
+    LATEST_MODEL = max(glob.glob(os.path.join(MODELS_DIR, "*.pth")), key=os.path.getctime)
+    LATEST_SCALER = max(glob.glob(os.path.join(SCALERS_DIR, "*.pkl")), key=os.path.getctime)
+    
+    print(f"🚀 Evaluating Model: {os.path.basename(LATEST_MODEL)}")
+    print(f"📏 Using Scaler:     {os.path.basename(LATEST_SCALER)}")
+except ValueError:
+    print("❌ Error: No models or scalers found!")
+    exit()
+
+# 4. Load Model and Data
+model = TractionNet()
+model.load_state_dict(torch.load(LATEST_MODEL))
+model.eval()
+scaler = joblib.load(LATEST_SCALER)
+
+csv_files = glob.glob(os.path.join(DATA_DIR, "*.csv"))
+df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
+df.columns = df.columns.str.strip()
+df = df.loc[:, ~df.columns.duplicated()].dropna()
+
+# 5. Predict
+X_raw = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
+y_true = df['slip_ratio'].values
+X_scaled = scaler.transform(X_raw)
+X_tensor = torch.FloatTensor(X_scaled)
+
+with torch.no_grad():
+    y_pred = model(X_tensor).numpy().flatten()
+
+# 6. Metrics & Printing
+rmse = np.sqrt(np.mean((y_true - y_pred)**2))
+r2 = r2_score(y_true, y_pred)
+
+print(f"\n--- Statistical Report (v2 Weighted) ---")
+print(f"RMSE (Error): {rmse:.4f}")
+print(f"R² Score:     {r2:.4f}")
+
+# Binary Safety Threshold (0.5)
+y_true_bool = y_true > 0.5
+y_pred_bool = y_pred > 0.5
+conf_matrix = confusion_matrix(y_true_bool, y_pred_bool)
+
+print(f"\n--- Safety Detection (Binary) ---")
+print(classification_report(y_true_bool, y_pred_bool, target_names=["Traction", "SLIP"]))
+
+# 7. Visualization
+plt.figure(figsize=(15, 10))
+
+plt.subplot(2, 2, 1)
+plt.scatter(y_true, y_pred, alpha=0.1, color='teal')
+plt.plot([0, 1], [0, 1], color='red', linestyle='--')
+plt.title(f'Prediction Correlation (R²: {r2:.2f})')
+
+plt.subplot(2, 2, 2)
+plt.scatter(df['v_enc'], y_true - y_pred, alpha=0.1, color='orange')
+plt.axhline(0, color='black')
+plt.title('Error vs. Robot Speed')
+
+plt.subplot(2, 2, 3)
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Greens', 
+            xticklabels=['Grip', 'Slip'], yticklabels=['Grip', 'Slip'])
+plt.title('v2 Weighted Confusion Matrix')
+
+plt.subplot(2, 2, 4)
+plt.hist(y_true - y_pred, bins=50, color='purple', alpha=0.7)
+plt.title('Error Histogram')
+
+plt.tight_layout()
+plt.savefig(os.path.join(PLOTS_DIR, "v2_evaluation_report.png"))
+print(f"\n✅ Balanced Report Saved: plots/v2_evaluation_report.png")
