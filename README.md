@@ -19,26 +19,21 @@
 
 Ground robots operating on uneven, wet, or loose terrain are highly susceptible to **wheel slip**, which causes trajectory deviation, mission failure, and potential hardware damage. NeuroTraction solves this by embedding a **TractionNet** neural network directly inside a **ROS2 safety node** that predicts slip probability (0–1) at **20 Hz** and dynamically scales velocity commands.
 
-2. 👥 Team Contributions
+2. 🔧 What I Built
 ---
 
-### 2.1 Pooja Kiran - Lead AI Systems Architect
+Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 
-| # | Domain | Contribution Details | Specifications |
+| # | Domain | Details | Specifications |
 |---|---|---|---|
-| 1 | **TractionNet MLP Architecture** | Designed a lightweight Sequential MLP optimized for low-latency embedded inference | 7-feature input, 0.945 held-out R² |
-| 2 | **Feature Engineering & Scaling** | Implemented real-time `StandardScaler` normalization for 6-axis IMU + Encoder velocity | Pre-processed feature fusion |
-| 3 | **Data Augmentation Suite** | Built a synthetic terrain augmentation pipeline for model generalization across 5+ ground types | Noise injection & signal shifting |
-| 4 | **Model Optimization** | Conducted extensive hyperparameter tuning and regularization to achieve high-precision slip prediction | <5ms inference latency |
-
-### 2.2 Rhutvik Pachghare - Robotics Systems & DevOps Engineer
-
-| # | Domain | Contribution Details | Specifications |
-|---|---|---|---|
-| 1 | **ROS2 Safety Node** | Developed the core real-time node subscribing to `/imu/data` and `/odom` | ROS2 Humble, 20Hz publication |
-| 2 | **Command Interceptor Logic** | Engineered the modular scaling layer (`/safe_cmd_vel`) to work across any navigation stack | Linear command interpolation |
-| 3 | **Isaac Sim Simulation** | Built the synthetic data collection environment in NVIDIA Isaac Sim for training data generation | Realistic terrain physics |
-| 4 | **Validation Suite** | `pytest` suite guarding against data leakage (scaler-fit-before-split), hardcoded paths, and methodology regressions; CI-enforced | leakage-guard tests, CI (no failure masking) |
+| 1 | **TractionNet MLP** | Lightweight Sequential MLP for low-latency slip prediction | 7-feature input, 0.945 held-out R² |
+| 2 | **Feature Engineering & Scaling** | `StandardScaler` normalization for 6-axis IMU + encoder velocity (fit on train only) | Leakage-free feature fusion |
+| 3 | **Data Augmentation** | Synthetic terrain augmentation for generalization across ground types | Noise injection & signal shifting |
+| 4 | **Model Optimization** | Hyperparameter tuning + regularization for high-precision slip prediction | <5ms inference latency |
+| 5 | **ROS2 Safety Node** | Real-time node subscribing to `/imu/data` and `/odom` | ROS2 Humble, 20Hz |
+| 6 | **Command Interceptor** | Modular scaling layer (`/safe_cmd_vel`) for any navigation stack | Linear command interpolation |
+| 7 | **Isaac Sim Simulation** | Synthetic data-collection environment for training data | Realistic terrain physics |
+| 8 | **Validation Suite & CI** | `pytest` leakage guard (scaler-fit-before-split, hardcoded paths, methodology) | CI-enforced, no failure masking |
 
 3. ✨ Key Capabilities
 ---
