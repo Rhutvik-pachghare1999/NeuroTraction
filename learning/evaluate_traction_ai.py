@@ -24,10 +24,11 @@ class TractionNet(nn.Module):
         return self.net(x)
 
 # 2. Setup
-MODELS_DIR = 'models'
-SCALERS_DIR = 'scalers'
-PLOTS_DIR = 'plots'
-DATA_DIR = '../data'
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(_THIS_DIR, 'models')
+SCALERS_DIR = os.path.join(_THIS_DIR, 'scalers')
+PLOTS_DIR = os.path.join(_THIS_DIR, 'plots')
+DATA_DIR = os.environ.get("NEUROTRACTION_DATA", os.path.join(_THIS_DIR, '..', 'data'))
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # 3. Auto-select latest assets (Looking for v2 specifically)

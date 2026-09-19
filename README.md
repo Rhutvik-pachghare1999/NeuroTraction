@@ -8,7 +8,7 @@
 [![R2 Score](https://img.shields.io/badge/held--out%20R%C2%B2-0.945-brightgreen.svg)](#-benchmark--model-performance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**NeuroTraction** is a real-time AI-powered traction safety system for ground robots. It uses a lightweight neural network to predict wheel slip probability from live IMU and odometry data, dynamically throttling motor commands to prevent loss of traction before it occurs.
+**NeuroTraction** is a real-time AI-powered traction safety system for ground robots. It uses a lightweight neural network to estimate a wheel **slip ratio** from live IMU and odometry data, dynamically throttling motor commands to prevent loss of traction before it occurs.
 
 </div>
 
@@ -17,7 +17,7 @@
 1. 📖 Overview
 ---
 
-Ground robots operating on uneven, wet, or loose terrain are highly susceptible to **wheel slip**, which causes trajectory deviation, mission failure, and potential hardware damage. NeuroTraction solves this by embedding a **TractionNet** neural network directly inside a **ROS2 safety node** that predicts slip probability (0–1) at **20 Hz** and dynamically scales velocity commands.
+Ground robots operating on uneven, wet, or loose terrain are highly susceptible to **wheel slip**, which causes trajectory deviation, mission failure, and potential hardware damage. NeuroTraction solves this by embedding a **TractionNet** neural network inside a **ROS2 safety node** that estimates a **slip ratio (0–1)** and scales velocity commands. Inference is gated by a **50 ms rate limiter** (≤20 Hz) inside the command callback.
 
 2. 🔧 What I Built
 ---
@@ -30,8 +30,8 @@ Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 | 2 | **Feature Engineering & Scaling** | `StandardScaler` normalization for 6-axis IMU + encoder velocity (fit on train only) | Leakage-free feature fusion |
 | 3 | **Data Augmentation** | Synthetic terrain augmentation for generalization across ground types | Noise injection & signal shifting |
 | 4 | **Model Optimization** | Hyperparameter tuning + regularization for high-precision slip prediction | small MLP, sub-ms inference expected (not yet benchmarked) |
-| 5 | **ROS2 Safety Node** | Real-time node subscribing to `/imu/data` and `/odom` | ROS2 Humble, 20Hz |
-| 6 | **Command Interceptor** | Modular scaling layer (`/safe_cmd_vel`) for any navigation stack | Linear command interpolation |
+| 5 | **ROS2 Safety Node** | Real-time node subscribing to IMU + odom | ROS2 Humble, ≤20Hz (rate-limited) |
+| 6 | **Command Interceptor** | Modular scaling layer (publishes a throttled `cmd_vel`) for any navigation stack | Linear command interpolation |
 | 7 | **Isaac Sim Simulation** | Synthetic data-collection environment for training data | Realistic terrain physics |
 | 8 | **Validation Suite & CI** | `pytest` leakage guard (scaler-fit-before-split, hardcoded paths, methodology) | CI-enforced, no failure masking |
 
@@ -40,9 +40,9 @@ Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 
 | # | Capability | Description | Technical Implementation |
 |---|---|---|---|
-| 1 | **20 Hz Inference** | Slip prediction on a 20Hz timer matching the controller loop | PyTorch eager `forward()` on a small MLP |
-| 2 | **Dynamic Throttling** | Auto-scaling of velocity based on slip probability | Linear & Sigmoid scaling modes |
-| 3 | **Modular Integration** | Plugs into standard ROS2 navigation stacks | Subscribes to `/cmd_vel`, Publishes `/safe_cmd_vel` |
+| 1 | **20 Hz Inference** | Slip estimate gated by a 50ms rate limiter (≤20Hz) | PyTorch eager `forward()` on a small MLP |
+| 2 | **Dynamic Throttling** | Auto-scaling of velocity based on slip ratio estimate | Linear & Sigmoid scaling modes |
+| 3 | **Modular Integration** | Plugs into standard ROS2 navigation stacks | Subscribes to `/cmd_vel_raw`, publishes namespaced `cmd_vel` |
 | 4 | **Safety Floor** | Guarantees a minimum 10% throttle floor to avoid full stops | Hardcoded safety threshold |
 
 4. 🏗️ Architecture
@@ -96,10 +96,14 @@ pip install -r requirements.txt
 
 | ROS2 Topic | Message Type | Description |
 |---|---|---|
-| `/imu/data` | `sensor_msgs/Imu` | 6-axis IMU (acc + gyro) |
-| `/odom` | `nav_msgs/Odometry` | Wheel encoder velocity |
-| `/cmd_vel` | `geometry_msgs/Twist` | Raw input velocity command |
-| `/safe_cmd_vel` | `geometry_msgs/Twist` | Safe throttle-scaled output |
+| `/a200_0000/sensors/imu_0/data` | `sensor_msgs/Imu` | 6-axis IMU (acc + gyro) |
+| `/a200_0000/platform/odom` | `nav_msgs/Odometry` | Wheel/encoder velocity |
+| `/cmd_vel_raw` | `geometry_msgs/Twist` | Raw input velocity command |
+| `/a200_0000/cmd_vel` | `geometry_msgs/TwistStamped` | Safe throttle-scaled output |
+
+> Topic names above match the current node (`scripts/traction_inference.py`),
+> configured for a Clearpath Husky A200 (`a200_0000` namespace). Rename the
+> subscriptions/publisher for a different platform.
 
 8. 📊 Benchmark & Model Performance
 ---
@@ -109,7 +113,7 @@ pip install -r requirements.txt
 | Metric | Result | Status |
 |---|---|---|
 | **R² Score (held-out)** | 0.945 | ✅ measured |
-| **Inference Rate** | 20 Hz (timer) | ✅ by design |
+| **Inference Rate** | ≤20 Hz (50ms rate limiter) | ✅ by design |
 | **Inference Latency** | sub-ms expected (5-layer MLP) | ⚠️ not yet benchmarked |
 | **Binary Grip/Slip Accuracy (held-out)** | ~99.4% | ✅ measured |
 
