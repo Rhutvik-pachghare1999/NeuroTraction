@@ -32,9 +32,9 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 
 # 3. Auto-select latest assets (Looking for v2 specifically)
 try:
-    # This picks the absolute latest file regardless of name
-    LATEST_MODEL = max(glob.glob(os.path.join(MODELS_DIR, "*.pth")), key=os.path.getctime)
-    LATEST_SCALER = max(glob.glob(os.path.join(SCALERS_DIR, "*.pkl")), key=os.path.getctime)
+    # This architecture matches the v2 training script — load a v2 model/scaler.
+    LATEST_MODEL = max(glob.glob(os.path.join(MODELS_DIR, "*v2*.pth")), key=os.path.getctime)
+    LATEST_SCALER = max(glob.glob(os.path.join(SCALERS_DIR, "*v2*.pkl")), key=os.path.getctime)
     
     print(f"🚀 Evaluating Model: {os.path.basename(LATEST_MODEL)}")
     print(f"📏 Using Scaler:     {os.path.basename(LATEST_SCALER)}")
@@ -53,30 +53,39 @@ df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
 df.columns = df.columns.str.strip()
 df = df.loc[:, ~df.columns.duplicated()].dropna()
 
-# 5. Predict
-X_raw = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
-y_true = df['slip_ratio'].values
+# 5. Reproduce the SAME held-out split used in training (random_state=42),
+#    and evaluate ONLY on the sealed test partition — not the whole dataset.
+#    The scaler was fit on the training partition, so applying it to the test
+#    rows here is leakage-free.
+from sklearn.model_selection import train_test_split
+
+X_all = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
+y_all = df['slip_ratio'].values
+_, X_raw, _, y_true = train_test_split(X_all, y_all, test_size=0.2, random_state=42)
+
 X_scaled = scaler.transform(X_raw)
 X_tensor = torch.FloatTensor(X_scaled)
 
 with torch.no_grad():
     y_pred = model(X_tensor).numpy().flatten()
 
-# 6. Metrics & Printing
+# 6. Metrics & Printing (held-out test set only)
 rmse = np.sqrt(np.mean((y_true - y_pred)**2))
 r2 = r2_score(y_true, y_pred)
 
-print(f"\n--- Statistical Report (v2 Weighted) ---")
+print(f"\n--- Held-out Test Report (v2 Weighted, 20% split) ---")
+print(f"Test samples: {len(y_true)}")
 print(f"RMSE (Error): {rmse:.4f}")
-print(f"R² Score:     {r2:.4f}")
+print(f"R2 Score:     {r2:.4f}")
 
-# Binary Safety Threshold (0.5)
-y_true_bool = y_true > 0.5
-y_pred_bool = y_pred > 0.5
-conf_matrix = confusion_matrix(y_true_bool, y_pred_bool)
+# Binary grip/slip threshold — MUST match training definition (slip_ratio < 0.1 = traction).
+SLIP_THRESHOLD = 0.1
+y_true_slip = y_true >= SLIP_THRESHOLD   # True = slipping
+y_pred_slip = y_pred >= SLIP_THRESHOLD
+conf_matrix = confusion_matrix(y_true_slip, y_pred_slip)
 
-print(f"\n--- Safety Detection (Binary) ---")
-print(classification_report(y_true_bool, y_pred_bool, target_names=["Traction", "SLIP"]))
+print(f"\n--- Safety Detection (Binary, threshold={SLIP_THRESHOLD}) ---")
+print(classification_report(y_true_slip, y_pred_slip, target_names=["Traction", "SLIP"]))
 
 # 7. Visualization
 plt.figure(figsize=(15, 10))
@@ -87,9 +96,9 @@ plt.plot([0, 1], [0, 1], color='red', linestyle='--')
 plt.title(f'Prediction Correlation (R²: {r2:.2f})')
 
 plt.subplot(2, 2, 2)
-plt.scatter(df['v_enc'], y_true - y_pred, alpha=0.1, color='orange')
+plt.scatter(X_raw[:, 6], y_true - y_pred, alpha=0.3, color='orange')  # X_raw col 6 = v_enc (test set)
 plt.axhline(0, color='black')
-plt.title('Error vs. Robot Speed')
+plt.title('Error vs. Robot Speed (held-out)')
 
 plt.subplot(2, 2, 3)
 sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Greens', 
