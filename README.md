@@ -29,7 +29,7 @@ Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 | 1 | **TractionNet MLP** | Lightweight Sequential MLP for low-latency slip prediction | 7-feature input, 0.945 held-out R² |
 | 2 | **Feature Engineering & Scaling** | `StandardScaler` normalization for 6-axis IMU + encoder velocity (fit on train only) | Leakage-free feature fusion |
 | 3 | **Data Augmentation** | Synthetic terrain augmentation for generalization across ground types | Noise injection & signal shifting |
-| 4 | **Model Optimization** | Hyperparameter tuning + regularization for high-precision slip prediction | <5ms inference latency |
+| 4 | **Model Optimization** | Hyperparameter tuning + regularization for high-precision slip prediction | small MLP, sub-ms inference expected (not yet benchmarked) |
 | 5 | **ROS2 Safety Node** | Real-time node subscribing to `/imu/data` and `/odom` | ROS2 Humble, 20Hz |
 | 6 | **Command Interceptor** | Modular scaling layer (`/safe_cmd_vel`) for any navigation stack | Linear command interpolation |
 | 7 | **Isaac Sim Simulation** | Synthetic data-collection environment for training data | Realistic terrain physics |
@@ -40,7 +40,7 @@ Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 
 | # | Capability | Description | Technical Implementation |
 |---|---|---|---|
-| 1 | **20 Hz Inference** | Real-time slip prediction matching robot controller frequency | PyTorch JIT/TorchScript |
+| 1 | **20 Hz Inference** | Slip prediction on a 20Hz timer matching the controller loop | PyTorch eager `forward()` on a small MLP |
 | 2 | **Dynamic Throttling** | Auto-scaling of velocity based on slip probability | Linear & Sigmoid scaling modes |
 | 3 | **Modular Integration** | Plugs into standard ROS2 navigation stacks | Subscribes to `/cmd_vel`, Publishes `/safe_cmd_vel` |
 | 4 | **Safety Floor** | Guarantees a minimum 10% throttle floor to avoid full stops | Hardcoded safety threshold |
@@ -72,8 +72,8 @@ graph LR
 
 ### 5.2 Installation
 ```bash
-git clone https://github.com/Rhutvik-pachghare1999/NeuroTraction.git
-cd NeuroTraction
+git clone https://github.com/Rhutvik-pachghare1999/neurotraction-ros2-slip-control.git
+cd neurotraction-ros2-slip-control
 pip install -r requirements.txt
 ```
 
@@ -82,10 +82,14 @@ pip install -r requirements.txt
 
 | # | Command | Description |
 |---|---|---|
-| 1 | `ros2 run neuro_traction safety_node.py` | Launch the real-time safety node |
-| 2 | `python learning/train_traction_ai_v2.py` | Train the TractionNet model |
-| 3 | `python learning/evaluate_traction_ai.py` | Evaluate model on test data |
-| 4 | `pytest tests/ -v` | Run the validation suite |
+| 1 | `python scripts/traction_inference.py` | Launch the real-time ROS2 safety node (`neural_traction_control`) |
+| 2 | `python learning/train_traction_ai_v2.py` | Train TractionNet + print held-out R² |
+| 3 | `python learning/evaluate_traction_ai.py` | Evaluate a saved model on the dataset |
+| 4 | `pytest tests/ -v` | Run the leakage-guard validation suite |
+
+> The node loads the latest trained model/scaler from `learning/models` and
+> `learning/scalers` (override with `NEUROTRACTION_MODEL` / `NEUROTRACTION_SCALER`).
+> Train once before running the node.
 
 7. 🔧 ROS2 Integration
 ---
@@ -102,10 +106,10 @@ pip install -r requirements.txt
 
 | Metric | Result | Status |
 |---|---|---|
-| **R² Score (held-out)** | 0.945 | ✅ |
-| **Inference Rate** | 20 Hz | ✅ |
-| **Inference Latency** | <5ms | ✅ |
-| **Binary Grip/Slip Accuracy (held-out)** | ~99.4% | ✅ |
+| **R² Score (held-out)** | 0.945 | ✅ measured |
+| **Inference Rate** | 20 Hz (timer) | ✅ by design |
+| **Inference Latency** | sub-ms expected (5-layer MLP) | ⚠️ not yet benchmarked |
+| **Binary Grip/Slip Accuracy (held-out)** | ~99.4% | ✅ measured |
 
 > Metrics are measured on a 20% held-out split with the `StandardScaler` fit on
 > the training partition only (no leakage). Reproducible via
@@ -117,9 +121,14 @@ pip install -r requirements.txt
 ---
 
 ### 9.1 CI/CD Workflow
-- **Linting**: Ruff
-- **Testing**: Pytest (Model, ROS2, Logic)
-- **Validation**: Coverage report > 90%
+GitHub Actions runs on every push/PR (`.github/workflows/ci.yml`), no failure masking:
+- **Leakage guard**: fails if a scaler is ever fit on the full dataset before the train/test split
+- **Path guard**: fails on hardcoded absolute paths in the training scripts
+- **Methodology check**: verifies split-before-scale is preserved
+
+```bash
+pytest tests/ -v
+```
 
 10. 📐 Design Decisions
 ---

@@ -7,7 +7,8 @@ import numpy as np
 # 1. LOAD ALL DATASETS
 # =========================
 
-data_dir = "/home/rhutvik/portfolio_projects/ros2/data"
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.environ.get("NEUROTRACTION_DATA", os.path.join(_THIS_DIR, "..", "data"))
 csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
 
 if not csv_files:

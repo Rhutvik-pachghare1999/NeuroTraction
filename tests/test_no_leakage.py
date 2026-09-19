@@ -34,8 +34,12 @@ def test_no_fit_transform_on_full_X():
 
 
 def test_no_hardcoded_home_path():
-    for script in ("train_traction_ai.py", "train_traction_ai_v2.py"):
-        assert "/home/rhutvik" not in _src(script), f"{script} has a hardcoded absolute path"
+    """No source file may contain a hardcoded /home/<user> path."""
+    import glob
+    root = LEARNING.parent
+    py_files = glob.glob(str(root / "learning" / "*.py")) + glob.glob(str(root / "scripts" / "*.py"))
+    for path in py_files:
+        assert "/home/rhutvik" not in Path(path).read_text(), f"{path} has a hardcoded absolute path"
 
 
 def test_leak_actually_changes_scaling():

@@ -27,9 +27,24 @@ class NeuralTractionControl(Node):
     def __init__(self):
         super().__init__('neural_traction_control')
 
-        # --- PATHS (Matches your 0.99 R2 Model) ---
-        model_path = '/home/rhutvik/portfolio_projects/ros2/learning/models/traction_model_v2_20260218_163117.pth'
-        scaler_path = '/home/rhutvik/portfolio_projects/ros2/learning/scalers/scaler_v2_20260218_163117.pkl'
+        # --- PATHS ---
+        # Configurable so this runs off a fresh clone. Point these at the
+        # trained artifacts produced by learning/train_traction_ai_v2.py.
+        import os, glob
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        models_dir = os.environ.get("NEUROTRACTION_MODELS", os.path.join(repo_root, "learning", "models"))
+        scalers_dir = os.environ.get("NEUROTRACTION_SCALERS", os.path.join(repo_root, "learning", "scalers"))
+
+        def _latest(d, pattern):
+            hits = sorted(glob.glob(os.path.join(d, pattern)))
+            if not hits:
+                raise FileNotFoundError(
+                    f"No {pattern} in {d}. Train first: python learning/train_traction_ai_v2.py"
+                )
+            return hits[-1]
+
+        model_path = os.environ.get("NEUROTRACTION_MODEL", _latest(models_dir, "traction_model_v2_*.pth"))
+        scaler_path = os.environ.get("NEUROTRACTION_SCALER", _latest(scalers_dir, "scaler_v2_*.pkl"))
 
         # Load Brain
         self.model = TractionNet()
