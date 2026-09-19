@@ -1,4 +1,8 @@
 __pycache__/
+venv/
+.venv/
+learning/models/*.pth
+learning/scalers/*.pkl
 *.pyc
 .ipynb_checkpoints/
 learning/plots/*.png

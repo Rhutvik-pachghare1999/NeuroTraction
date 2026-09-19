@@ -11,8 +11,12 @@ import os
 import datetime
 
 # 1. Load and Balance the Dataset
-data_dir = "/home/rhutvik/portfolio_projects/ros2/data"
+# Repo-relative data dir so this runs from a fresh clone on any machine.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.environ.get("NEUROTRACTION_DATA", os.path.join(_THIS_DIR, "..", "data"))
 csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+if not csv_files:
+    raise FileNotFoundError(f"No CSV files found in {data_dir}. Set NEUROTRACTION_DATA or add data/.")
 
 df = pd.concat([pd.read_csv(f).rename(columns=lambda x: x.strip()) for f in csv_files], ignore_index=True)
 df = df.loc[:, ~df.columns.duplicated()].dropna()
@@ -30,13 +34,16 @@ print(f"Applying Importance Weight of {weight_for_traction:.2f}x to Traction row
 X = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
 y = df['slip_ratio'].values.reshape(-1, 1)
 
-# 2. Preprocessing
-scaler = StandardScaler()
-X = scaler.fit_transform(X)
-
-X_train, X_test, y_train, y_test, weight_train, weight_test = train_test_split(
+# 2. Split FIRST, then fit the scaler on TRAIN ONLY (no leakage).
+# Fitting the scaler on the full X before splitting would leak test-set
+# statistics into training. Split -> fit on train -> transform both.
+X_train_raw, X_test_raw, y_train, y_test, weight_train, weight_test = train_test_split(
     X, y, is_traction, test_size=0.2, random_state=42
 )
+
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train_raw)   # fit on train only
+X_test = scaler.transform(X_test_raw)          # apply train stats to test
 
 # Convert to Tensors
 X_train = torch.FloatTensor(X_train); y_train = torch.FloatTensor(y_train)
@@ -89,7 +96,20 @@ for epoch in range(epochs):
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.6f}, LR: {current_lr}")
 
-# 6. Save (Sync Names)
+# 6. Held-out evaluation (test set the model NEVER trained on)
+from sklearn.metrics import r2_score
+model.eval()
+with torch.no_grad():
+    y_test_pred = model(X_test).numpy()
+holdout_r2 = r2_score(y_test, y_test_pred)
+# Binary grip/slip accuracy at the 0.1 slip threshold, on held-out data.
+pred_traction = (y_test_pred.ravel() < 0.1)
+true_traction = (np.asarray(y_test).ravel() < 0.1)
+holdout_bin_acc = float(np.mean(pred_traction == true_traction))
+print(f"Held-out R2:              {holdout_r2:.4f}")
+print(f"Held-out binary accuracy: {holdout_bin_acc:.4f}")
+
+# 7. Save (Sync Names)
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 torch.save(model.state_dict(), f"models/traction_model_v2_{timestamp}.pth")
 joblib.dump(scaler, f"scalers/scaler_v2_{timestamp}.pkl")

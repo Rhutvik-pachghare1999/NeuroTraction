@@ -11,7 +11,8 @@ import os
 import datetime
 
 # 1. Load the Dataset
-data_dir = "/home/rhutvik/portfolio_projects/ros2/data"
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.environ.get("NEUROTRACTION_DATA", os.path.join(_THIS_DIR, "..", "data"))
 csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
 
 if not csv_files:
@@ -42,11 +43,12 @@ X_cols = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']
 X = df[X_cols].values            
 y = df['slip_ratio'].values.reshape(-1, 1)                              
 
-# 2. Preprocessing
-scaler = StandardScaler()
-X = scaler.fit_transform(X)
+# 2. Split FIRST, then fit scaler on TRAIN ONLY (no leakage).
+X_train_raw, X_test_raw, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train_raw)
+X_test  = scaler.transform(X_test_raw)
 
 X_train = torch.FloatTensor(X_train)
 X_test  = torch.FloatTensor(X_test)
@@ -101,12 +103,16 @@ for epoch in range(epochs):
     
 # 6. Save the Model
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+_MODELS_DIR = os.path.join(_THIS_DIR, "models")
+_SCALERS_DIR = os.path.join(_THIS_DIR, "scalers")
+os.makedirs(_MODELS_DIR, exist_ok=True)
+os.makedirs(_SCALERS_DIR, exist_ok=True)
 model_name = f"traction_model_{timestamp}_loss_{loss.item():.4f}.pth"
-model_save_path = os.path.join("/home/rhutvik/portfolio_projects/ros2/learning/models", model_name)
+model_save_path = os.path.join(_MODELS_DIR, model_name)
 
 
 scaler_name = f"scaler_{timestamp}.pkl"
-scaler_save_path = os.path.join("/home/rhutvik/portfolio_projects/ros2/learning/scalers", scaler_name)
+scaler_save_path = os.path.join(_SCALERS_DIR, scaler_name)
 joblib.dump(scaler, scaler_save_path)
 print(f"Scaler saved to {scaler_save_path}")
 
