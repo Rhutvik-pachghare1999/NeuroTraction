@@ -3,12 +3,17 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import joblib
 import glob
 import os
 import datetime
+
+# Fixed seeds so the reported held-out R2 is reproducible run-to-run.
+# (With this small 3-run dataset the metric is otherwise high-variance —
+# see the reproducibility/limitations note in the README.)
+torch.manual_seed(42)
+np.random.seed(42)
 
 # 1. Load and Balance the Dataset
 # Repo-relative data dir so this runs from a fresh clone on any machine.
@@ -18,32 +23,58 @@ csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
 if not csv_files:
     raise FileNotFoundError(f"No CSV files found in {data_dir}. Set NEUROTRACTION_DATA or add data/.")
 
-df = pd.concat([pd.read_csv(f).rename(columns=lambda x: x.strip()) for f in csv_files], ignore_index=True)
-df = df.loc[:, ~df.columns.duplicated()].dropna()
+# Load each recording separately, preserving row order and tagging the source
+# recording. Rows within a recording are a time series (adjacent rows highly
+# correlated), and each fixed-velocity run ends in a constant fully-slipping
+# tail. Two honest consequences:
+#   * A pure random row split leaks (neighbors land in both train and test) and
+#     inflates R2 — this is what the earlier 0.945 number did.
+#   * A pure temporal tail split makes the test set the constant slip=1.0 tail
+#     (zero variance -> R2 undefined/0), which is also not representative.
+# With only 3 short scripted runs there is no clean episode-level split. We use
+# a per-recording strided hold-out (every 5th sample -> test) which keeps both
+# grip and slip regimes in the test set and is far less leaky than random row
+# shuffling. The honest caveat: adjacent strided samples are still ~0.05 s apart,
+# so this is a limited proxy for a true multi-recording hold-out. See README.
+frames = []
+for rec_id, f in enumerate(sorted(csv_files)):
+    d = pd.read_csv(f).rename(columns=lambda x: x.strip())
+    d = d.loc[:, ~d.columns.duplicated()].dropna().reset_index(drop=True)
+    d["_rec"] = rec_id
+    d["_order"] = np.arange(len(d))
+    frames.append(d)
+df = pd.concat(frames, ignore_index=True)
 
-# --- THE PRO FIX: CALCULATE WEIGHTS ---
-# We want to give the "Traction" (slip < 0.1) more importance
-is_traction = (df['slip_ratio'] < 0.1).values
-traction_count = np.sum(is_traction)
-slip_count = len(df) - traction_count
+FEATURES = ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']
+
+# Per-recording strided hold-out: every 5th row (by time order) -> test.
+test_mask = np.zeros(len(df), dtype=bool)
+for rec_id, g in df.groupby("_rec"):
+    ordered = g.sort_values("_order").index
+    test_mask[ordered[4::5]] = True   # indices 4,9,14,... within each recording
+
+train_df = df[~test_mask]
+test_df = df[test_mask]
+
+is_traction_train = (train_df['slip_ratio'] < 0.1).values
+traction_count = int(np.sum(is_traction_train))
+slip_count = len(train_df) - traction_count
 weight_for_traction = slip_count / max(traction_count, 1)
 
-print(f"Dataset Balance: {traction_count} Traction vs {slip_count} Slip")
-print(f"Applying Importance Weight of {weight_for_traction:.2f}x to Traction rows.")
+print(f"Split: {len(train_df)} train / {len(test_df)} test rows "
+      f"(per-recording strided hold-out over {df['_rec'].nunique()} recordings)")
+print(f"Test slip std: {test_df['slip_ratio'].std():.3f} (must be >0 for a meaningful R2)")
+print(f"Train balance: {traction_count} Traction vs {slip_count} Slip")
 
-X = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
-y = df['slip_ratio'].values.reshape(-1, 1)
-
-# 2. Split FIRST, then fit the scaler on TRAIN ONLY (no leakage).
-# Fitting the scaler on the full X before splitting would leak test-set
-# statistics into training. Split -> fit on train -> transform both.
-X_train_raw, X_test_raw, y_train, y_test, weight_train, weight_test = train_test_split(
-    X, y, is_traction, test_size=0.2, random_state=42
-)
+X_train_raw = train_df[FEATURES].values
+X_test_raw = test_df[FEATURES].values
+y_train = train_df['slip_ratio'].values.reshape(-1, 1)
+y_test = test_df['slip_ratio'].values.reshape(-1, 1)
+weight_train = is_traction_train
 
 scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train_raw)   # fit on train only
-X_test = scaler.transform(X_test_raw)          # apply train stats to test
+X_train = scaler.fit_transform(X_train_raw)
+X_test = scaler.transform(X_test_raw)
 
 # Convert to Tensors
 X_train = torch.FloatTensor(X_train); y_train = torch.FloatTensor(y_train)

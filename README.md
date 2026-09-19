@@ -5,7 +5,7 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![ROS2](https://img.shields.io/badge/ROS2-Humble-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/humble/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![R2 Score](https://img.shields.io/badge/held--out%20R%C2%B2-0.945-brightgreen.svg)](#-benchmark--model-performance)
+[![R2 Score](https://img.shields.io/badge/held--out%20R%C2%B2-0.9999%20(tiny%20dataset%2C%20see%20caveat)-yellow.svg)](#-benchmark--model-performance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **NeuroTraction** is a real-time AI-powered traction safety system for ground robots. It uses a lightweight neural network to estimate a wheel **slip ratio** from live IMU and odometry data, dynamically throttling motor commands to prevent loss of traction before it occurs.
@@ -26,7 +26,7 @@ Solo project spanning the ML model, ROS2 integration, simulation data, and CI.
 
 | # | Domain | Details | Specifications |
 |---|---|---|---|
-| 1 | **TractionNet MLP** | Lightweight Sequential MLP for low-latency slip prediction | 7-feature input, 0.945 held-out R² |
+| 1 | **TractionNet MLP** | Lightweight Sequential MLP for low-latency slip prediction | 7-feature input, R²≈1.0 on a tiny 3-run set (see caveat) |
 | 2 | **Feature Engineering & Scaling** | `StandardScaler` normalization for 6-axis IMU + encoder velocity (fit on train only) | Leakage-free feature fusion |
 | 3 | **Data Augmentation** | Synthetic terrain augmentation for generalization across ground types | Noise injection & signal shifting |
 | 4 | **Model Optimization** | Hyperparameter tuning + regularization for high-precision slip prediction | small MLP, sub-ms inference expected (not yet benchmarked) |
@@ -112,16 +112,33 @@ pip install -r requirements.txt
 
 | Metric | Result | Status |
 |---|---|---|
-| **R² Score (held-out)** | 0.945 | ✅ measured |
+| **R² Score (held-out, seed 42)** | 0.9999 | ⚠️ see caveat |
 | **Inference Rate** | ≤20 Hz (50ms rate limiter) | ✅ by design |
 | **Inference Latency** | sub-ms expected (5-layer MLP) | ⚠️ not yet benchmarked |
 | **Binary Grip/Slip Accuracy (held-out)** | ~99.4% | ✅ measured |
 
-> Metrics are measured on a 20% held-out split with the `StandardScaler` fit on
-> the training partition only (no leakage). Reproducible via
-> `python learning/train_traction_ai_v2.py`. Earlier README versions reported
-> 0.9912 R² / 100% — those came from a scaler fit on the full dataset and
-> evaluation over training data; corrected here.
+> **Evaluation methodology — read this before trusting the number.** Metrics
+> come from a **per-recording strided hold-out** (within each of the 3 recordings,
+> every 5th sample by time order is held out; `StandardScaler` fit on train rows
+> only; seeds fixed for reproducibility). Reproduce:
+> `python learning/train_traction_ai_v2.py`.
+>
+> **What the R² does and does not mean:**
+> - Earlier versions reported **0.9912 R² / 100%** from a scaler fit on the full
+>   dataset and evaluation over training data — that was **leakage**, now removed.
+> - The current **0.9999** is leakage-free (no scaler leak, train/test rows are
+>   distinct) but it is **not evidence of generalization**. The dataset is only
+>   **3 short scripted fixed-velocity runs**; held-out samples sit ~0.05 s from a
+>   training neighbor, so the model is essentially *interpolating* between nearby
+>   points. A near-perfect R² here mostly says "the split is easy," not "the model
+>   generalizes."
+> - A pure temporal tail split is degenerate (each run ends in a constant
+>   fully-slipping tail → R² undefined), and a random row split leaks. There is no
+>   clean episode-level split possible with only 3 runs.
+> - **Honest bottom line:** this is a working, leakage-free *prototype* on limited
+>   data. The credible next step is collecting diverse multi-run/multi-terrain
+>   data and doing a true leave-one-recording-out evaluation before claiming a
+>   generalization number.
 
 9. 🧹 Testing
 ---

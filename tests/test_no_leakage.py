@@ -33,6 +33,14 @@ def test_no_fit_transform_on_full_X():
         assert "scaler.transform(X_test_raw)" in src, f"{script} must transform test with train stats"
 
 
+def test_v2_uses_recording_aware_split():
+    """v2 must use the per-recording strided hold-out, not a random row split
+    (random row splitting leaks correlated adjacent time-series samples)."""
+    src = _src("train_traction_ai_v2.py")
+    assert "_rec" in src and "test_mask" in src, "v2 must split by recording, not random rows"
+    assert "train_test_split(" not in src, "v2 must not use random train_test_split on rows"
+
+
 def test_no_hardcoded_home_path():
     """No source file may contain a hardcoded /home/<user> path."""
     import glob

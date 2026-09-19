@@ -49,20 +49,29 @@ model.load_state_dict(torch.load(LATEST_MODEL))
 model.eval()
 scaler = joblib.load(LATEST_SCALER)
 
-csv_files = glob.glob(os.path.join(DATA_DIR, "*.csv"))
-df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
-df.columns = df.columns.str.strip()
-df = df.loc[:, ~df.columns.duplicated()].dropna()
+# 5. Reproduce the SAME per-recording strided hold-out used in training
+#    (every 5th row by time order within each recording -> test), and evaluate
+#    ONLY on that test partition. The scaler was fit on the training partition,
+#    so applying it to the test rows here is leakage-free.
+csv_files = sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
+frames = []
+for rec_id, f in enumerate(csv_files):
+    d = pd.read_csv(f)
+    d.columns = d.columns.str.strip()
+    d = d.loc[:, ~d.columns.duplicated()].dropna().reset_index(drop=True)
+    d["_rec"] = rec_id
+    d["_order"] = np.arange(len(d))
+    frames.append(d)
+df = pd.concat(frames, ignore_index=True)
 
-# 5. Reproduce the SAME held-out split used in training (random_state=42),
-#    and evaluate ONLY on the sealed test partition — not the whole dataset.
-#    The scaler was fit on the training partition, so applying it to the test
-#    rows here is leakage-free.
-from sklearn.model_selection import train_test_split
+test_mask = np.zeros(len(df), dtype=bool)
+for rec_id, g in df.groupby("_rec"):
+    ordered = g.sort_values("_order").index
+    test_mask[ordered[4::5]] = True
+test_df = df[test_mask]
 
-X_all = df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
-y_all = df['slip_ratio'].values
-_, X_raw, _, y_true = train_test_split(X_all, y_all, test_size=0.2, random_state=42)
+X_raw = test_df[['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'v_enc']].values
+y_true = test_df['slip_ratio'].values
 
 X_scaled = scaler.transform(X_raw)
 X_tensor = torch.FloatTensor(X_scaled)
