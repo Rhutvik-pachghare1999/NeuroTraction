@@ -1,4 +1,4 @@
-# 🧠 NeuroTraction: Neural Network-Based Real-Time Traction Control
+# 🧠 NeuroTraction — Real-Time ML Traction Control for Ground Robots (ROS2)
 
 <div align="center">
 
