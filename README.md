@@ -104,6 +104,8 @@ pip install -r requirements.txt
 8. 📊 Benchmark & Model Performance
 ---
 
+![Leakage-free held-out evaluation: prediction vs ground truth + residuals](learning/plots/holdout_evaluation.png)
+
 | Metric | Result | Status |
 |---|---|---|
 | **R² Score (held-out)** | 0.945 | ✅ measured |
